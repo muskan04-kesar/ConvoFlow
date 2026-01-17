@@ -7,10 +7,18 @@ const { connectProducer } = require("./kafka");
 const { startConsumer } = require("./consumer");
 const { connectRedis } = require("./redis");
 const { initSocket } = require("./socket");
+const cors = require("cors");
+
+
 
 const app = express();
+app.use(cors({
+  origin: "http://localhost:5173",
+}));
 app.use(express.json());
 app.use("/api", routes);
+
+
 
 const startServer = async () => {
   // 1️⃣ Create HTTP server FIRST
