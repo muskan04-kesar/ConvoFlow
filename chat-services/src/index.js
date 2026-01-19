@@ -1,6 +1,8 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const connectDB = require("./db");
+
 
 const routes = require("./routes");
 const { connectProducer } = require("./kafka");
@@ -32,7 +34,9 @@ const startServer = async () => {
   await connectRedis();
 
   // 4️⃣ Start consumer AFTER socket exists
-  await startConsumer();
+
+  connectDB();
+
 
   // 5️⃣ Start listening
   server.listen(process.env.PORT, () => {
