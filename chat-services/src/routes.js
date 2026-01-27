@@ -1,3 +1,5 @@
+const Message = require("./models/message");
+
 const express = require("express");
 const router = express.Router();
 const { sendMessage } = require("./kafka");
@@ -22,6 +24,7 @@ router.post("/send-message", async (req, res) => {
       senderId,
       receiverId,
       content,
+      status: "sent",
       timestamp: new Date().toISOString(),
     };
 
@@ -53,19 +56,25 @@ router.post("/send-message", async (req, res) => {
    GET: FETCH MESSAGES (FIX)
 ======================= */
 router.get("/messages/:senderId/:receiverId", async (req, res) => {
+  const { senderId, receiverId } = req.params;
+
   try {
-    const { senderId, receiverId } = req.params;
-    
-    // logic to fetch messages from your database would go here
-    // For now, returning an empty array to stop the 404 error
-    const messages = []; 
-    
-    return res.status(200).json(messages);
+    const messages = await Message.find({
+      $or: [
+        { senderId, receiverId },
+        { senderId: receiverId, receiverId: senderId },
+      ],
+    })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    res.json(messages);
   } catch (err) {
-    console.error("🔥 Fetch messages error:", err);
-    return res.status(500).json({ error: "Failed to fetch messages" });
+    console.error("❌ Failed to fetch messages:", err.message);
+    res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
+
 /* =======================
    POST: RESET UNREAD COUNT
 ======================= */

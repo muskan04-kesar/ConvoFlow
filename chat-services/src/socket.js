@@ -20,6 +20,14 @@ const initSocket = (server) => {
     socket.on("disconnect", () => {
       console.log("❌ User disconnected:", socket.id);
     });
+    socket.on("typing", ({ senderId, receiverId }) => {
+      socket.to(receiverId).emit("typing", senderId);
+    });
+
+    socket.on("stop_typing", ({ senderId, receiverId }) => {
+      socket.to(receiverId).emit("stop_typing", senderId);
+    });
+
   });
 
   return io;

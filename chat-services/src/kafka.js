@@ -1,4 +1,6 @@
 const { Kafka } = require("kafkajs");
+const crypto = require("crypto");
+
 
 const kafka = new Kafka({
   clientId: "chat-service",
@@ -23,27 +25,35 @@ const connectProducer = async () => {
 
 const sendMessage = async (message) => {
   try {
+    const payload = {
+      ...message,
+      messageId: message.messageId || crypto.randomUUID(), // ⭐ ADD THIS
+    };
+
     console.log(`📤 Attempting to send to topic: ${process.env.KAFKA_TOPIC}`);
-    
+
     const result = await producer.send({
       topic: process.env.KAFKA_TOPIC,
       messages: [
         {
-          value: JSON.stringify(message),
+          key: `${payload.senderId}:${payload.receiverId}`, // ⭐ ORDER GUARANTEE
+          value: JSON.stringify(payload),
         },
       ],
       timeout: 5000,
-      acks: 1
+      acks: -1,
     });
-    
+
     console.log("✅ Message sent successfully:", result);
     return result;
   } catch (error) {
-    console.error("❌ Kafka send error:", error.message);
-    console.error("Full error:", error);
+    console.error("❌ Kafka send error:", error);
     throw error;
   }
 };
+
+
+
 
 const disconnectProducer = async () => {
   try {

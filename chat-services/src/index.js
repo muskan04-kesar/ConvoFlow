@@ -26,12 +26,14 @@ const startServer = async () => {
   // 1️⃣ Create HTTP server FIRST
   const server = http.createServer(app);
 
+
   // 2️⃣ Initialize socket.io FIRST
-  initSocket(server);
+  const socket = initSocket(server);
 
   // 3️⃣ Connect infra
   await connectProducer();
   await connectRedis();
+
 
   // 4️⃣ Start consumer AFTER socket exists
 
