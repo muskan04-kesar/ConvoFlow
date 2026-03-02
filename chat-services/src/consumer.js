@@ -1,18 +1,10 @@
-const connectDB = require("./db");
-connectDB();
-
 const Message = require("./models/message");
-const { Kafka } = require("kafkajs");
+const { kafka } = require("./kafka");
 const { getIO } = require("./socket");
 const { redisClient } = require("./redis");
 
-const kafka = new Kafka({
-  clientId: "chat-consumer",
-  brokers: ["localhost:9092"],
-});
-
 const consumer = kafka.consumer({
-  groupId: "chat-group-debug-1",
+  groupId: process.env.KAFKA_GROUP_ID || "chat-group",
 });
 
 const startConsumer = async () => {
@@ -20,16 +12,16 @@ const startConsumer = async () => {
     await consumer.connect();
     console.log("🟢 Kafka Consumer connected");
 
+    const topic = process.env.KAFKA_TOPIC || "chat-messages";
     await consumer.subscribe({
-      topic: "chat-messages",
+      topic: topic,
       fromBeginning: false,
     });
 
-    console.log("✅ Subscribed to chat-messages");
+    console.log(`✅ Subscribed to topic: ${topic}`);
 
     await consumer.run({
       autoCommit: false,
-
       eachMessage: async ({ topic, partition, message }) => {
         try {
           const data = JSON.parse(message.value.toString());
@@ -50,12 +42,16 @@ const startConsumer = async () => {
             },
             {
               upsert: true,
-              new: true, // ⭐ IMPORTANT
+              new: true,
             }
-          );
+          ).lean(); // Use .lean() or .toObject() for plain JS object
 
           const io = getIO();
-          io.to(data.receiverId).emit("new_message", savedMessage);
+          if (io) {
+            // Notify both sender and receiver rooms
+            io.to(data.senderId).to(data.receiverId).emit("new_message", savedMessage);
+          }
+
 
           const chatKey = [data.senderId, data.receiverId].sort().join(":");
           await redisClient.lPush(
@@ -88,5 +84,14 @@ const startConsumer = async () => {
   }
 };
 
-module.exports = { startConsumer };
-startConsumer();
+const disconnectConsumer = async () => {
+  try {
+    await consumer.disconnect();
+    console.log("✅ Kafka Consumer disconnected");
+  } catch (err) {
+    console.error("❌ Error disconnecting consumer:", err.message);
+  }
+};
+
+module.exports = { startConsumer, disconnectConsumer };
+

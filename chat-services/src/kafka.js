@@ -1,10 +1,9 @@
 const { Kafka } = require("kafkajs");
 const crypto = require("crypto");
 
-
 const kafka = new Kafka({
-  clientId: "chat-service",
-  brokers: [process.env.KAFKA_BROKER],
+  clientId: process.env.KAFKA_CLIENT_ID || "chat-service",
+  brokers: [process.env.KAFKA_BROKER || "localhost:9092"],
   connectionTimeout: 10000,
   requestTimeout: 30000,
 });
@@ -13,12 +12,12 @@ const producer = kafka.producer();
 
 const connectProducer = async () => {
   try {
-    console.log(`🔄 Connecting to Kafka broker: ${process.env.KAFKA_BROKER}`);
+    const broker = process.env.KAFKA_BROKER || "localhost:9092";
+    console.log(`🔄 Connecting to Kafka broker: ${broker}`);
     await producer.connect();
     console.log("✅ Kafka Producer connected");
   } catch (error) {
     console.error("❌ Failed to connect Kafka Producer:", error.message);
-    console.error("Broker:", process.env.KAFKA_BROKER);
     throw error;
   }
 };
@@ -27,16 +26,17 @@ const sendMessage = async (message) => {
   try {
     const payload = {
       ...message,
-      messageId: message.messageId || crypto.randomUUID(), // ⭐ ADD THIS
+      messageId: message.messageId || crypto.randomUUID(),
     };
 
-    console.log(`📤 Attempting to send to topic: ${process.env.KAFKA_TOPIC}`);
+    const topic = process.env.KAFKA_TOPIC || "chat-messages";
+    console.log(`📤 Attempting to send to topic: ${topic}`);
 
     const result = await producer.send({
-      topic: process.env.KAFKA_TOPIC,
+      topic: topic,
       messages: [
         {
-          key: `${payload.senderId}:${payload.receiverId}`, // ⭐ ORDER GUARANTEE
+          key: `${payload.senderId}:${payload.receiverId}`,
           value: JSON.stringify(payload),
         },
       ],
@@ -52,9 +52,6 @@ const sendMessage = async (message) => {
   }
 };
 
-
-
-
 const disconnectProducer = async () => {
   try {
     await producer.disconnect();
@@ -64,4 +61,4 @@ const disconnectProducer = async () => {
   }
 };
 
-module.exports = { connectProducer, sendMessage, disconnectProducer };
+module.exports = { kafka, connectProducer, sendMessage, disconnectProducer };

@@ -15,35 +15,35 @@ const cors = require("cors");
 
 const app = express();
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  credentials: true
 }));
 app.use(express.json());
 app.use("/api", routes);
 
-
-
 const startServer = async () => {
-  // 1️⃣ Create HTTP server FIRST
   const server = http.createServer(app);
 
+  // Initialize socket.io
+  initSocket(server);
 
-  // 2️⃣ Initialize socket.io FIRST
-  const socket = initSocket(server);
-
-  // 3️⃣ Connect infra
-  await connectProducer();
-  await connectRedis();
-
-
-  // 4️⃣ Start consumer AFTER socket exists
-
+  // Connect database
   connectDB();
 
+  // Connect infrastructure
+  try {
+    await connectProducer();
+    await connectRedis();
+    await startConsumer(); // Start Kafka consumer
+  } catch (error) {
+    console.error("❌ Infrastructure connection failed:", error);
+  }
 
-  // 5️⃣ Start listening
-  server.listen(process.env.PORT, () => {
-    console.log(`🚀 Chat service running on port ${process.env.PORT}`);
+  const port = process.env.PORT || 5000;
+  server.listen(port, () => {
+    console.log(`🚀 Chat service running on port ${port}`);
   });
 };
 
 startServer();
+

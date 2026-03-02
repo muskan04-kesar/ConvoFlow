@@ -1,4 +1,6 @@
 const Message = require("./models/message");
+const crypto = require("crypto");
+
 
 const express = require("express");
 const router = express.Router();
@@ -9,10 +11,8 @@ const { redisClient } = require("./redis");
    POST: SEND MESSAGE
 ======================= */
 router.post("/send-message", async (req, res) => {
-  console.log("➡️ /send-message hit");
-
   try {
-    const { senderId, receiverId, content } = req.body;
+    const { messageId, senderId, receiverId, content, timestamp } = req.body;
 
     if (!senderId || !receiverId || !content) {
       return res.status(400).json({
@@ -21,24 +21,20 @@ router.post("/send-message", async (req, res) => {
     }
 
     const message = {
+      messageId: messageId || crypto.randomUUID(),
       senderId,
       receiverId,
       content,
       status: "sent",
-      timestamp: new Date().toISOString(),
+      timestamp: timestamp || new Date().toISOString(),
     };
 
-    console.log("🟡 Sending to Kafka…");
+    console.log(`🟡 Sending message ${message.messageId} to Kafka…`);
 
-    await Promise.race([
-      sendMessage(message),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Kafka timeout")), 4000)
-      ),
-    ]);
+    await sendMessage(message);
 
     console.log("✅ API responding success");
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, messageId: message.messageId });
 
   } catch (err) {
     console.error("🔥 API error:", err.message);
@@ -48,6 +44,7 @@ router.post("/send-message", async (req, res) => {
     });
   }
 });
+
 
 /* =======================
    GET: FETCH MESSAGES
