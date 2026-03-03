@@ -1,34 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import { api } from "./api";
 
-const socket = io("http://localhost:3000");
-
-// Mock API for demo
-const api = {
-  get: async () => ({ data: [] }),
-  post: async () => ({})
-};
-
-
+const socket = io("http://localhost:5000", {
+  withCredentials: true,
+  transports: ["websocket", "polling"],
+});
 
 function App() {
+
   const [users, setUsers] = useState([
-    { id: "muskan", name: "Muskan", online: true },
-    { id: "dan", name: "Dan", online: true },
+    { id: "muskan", name: "Muskan", online: false },
+    { id: "dan", name: "Dan", online: false },
     { id: "alex", name: "Alex", online: false },
     { id: "sam", name: "Sam", online: false },
   ]);
 
+
   const [senderId, setSenderId] = useState("muskan");
   const [receiverId, setReceiverId] = useState("dan");
-
-
 
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
   const bottomRef = useRef(null);
   const [typingUser, setTypingUser] = useState(null);
   const typingTimeoutRef = useRef(null);
+
+  const senderIdRef = useRef(senderId);
+  const receiverIdRef = useRef(receiverId);
+
+  useEffect(() => {
+    senderIdRef.current = senderId;
+    receiverIdRef.current = receiverId;
+  }, [senderId, receiverId]);
 
   // Load messages
   const loadMessages = async () => {
@@ -41,10 +45,16 @@ function App() {
   };
 
   useEffect(() => {
-    socket.on("typing", ({ senderId }) => {
-      setTypingUser(senderId);
+    socket.on("user_status", (onlineUserIds) => {
+      setUsers((prev) =>
+        prev.map((u) => ({ ...u, online: onlineUserIds.includes(u.id) }))
+      );
     });
 
+    socket.on("typing", ({ senderId: typingSid }) => {
+      const user = users.find((u) => u.id === typingSid);
+      setTypingUser(user ? user.name : typingSid);
+    });
 
     socket.on("stop_typing", () => {
       setTypingUser(null);
@@ -53,21 +63,36 @@ function App() {
     socket.emit("join", senderId);
 
     socket.on("new_message", (msg) => {
-      if (
-        msg.senderId === senderId ||
-        msg.senderId === receiverId
-      ) {
-        setMessages((prev) => [...prev, msg]);
+      if (!msg || !msg.content) return;
+
+      const currentSender = senderIdRef.current;
+      const currentReceiver = receiverIdRef.current;
+
+      const isRelevant =
+        (msg.senderId === currentSender && msg.receiverId === currentReceiver) ||
+        (msg.senderId === currentReceiver && msg.receiverId === currentSender);
+
+      if (isRelevant) {
+        setMessages((prev) => {
+          const exists = prev.some(existing =>
+            existing.messageId === msg.messageId ||
+            (existing.content === msg.content && Math.abs(new Date(existing.timestamp) - new Date(msg.timestamp)) < 2000)
+          );
+          return exists ? prev : [...prev, msg];
+        });
       }
     });
+
     loadMessages();
 
     return () => {
       socket.off("new_message");
       socket.off("typing");
       socket.off("stop_typing");
+      socket.off("user_status");
     };
-  }, [senderId, receiverId]);
+  }, [senderId, receiverId, users]);
+
 
   // Auto scroll
   useEffect(() => {
@@ -77,29 +102,31 @@ function App() {
   const sendMessage = async () => {
     if (!message.trim()) return;
 
-    // Clear typing timeout and emit stop_typing
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     socket.emit("stop_typing", { senderId, receiverId });
 
     const payload = {
+      messageId: crypto.randomUUID(), // Generate locally for deduplication
       senderId,
       receiverId,
       content: message,
       timestamp: new Date().toISOString(),
-      status: "sent", // sent | delivered | read
+      status: "sent",
     };
 
-
     try {
-      await api.post("/send-message", payload);
+      // Optimistic update
       setMessages((prev) => [...prev, payload]);
       setMessage("");
+      await api.post("/send-message", payload);
     } catch (err) {
       console.error("Send failed", err);
+      // Optional: Rollback optimistic update on failure
     }
   };
+
 
   const handleTyping = (e) => {
     setMessage(e.target.value);
