@@ -264,10 +264,16 @@ function App() {
                         style={{
                           ...styles.bubble,
                           background: isMe ? "#349c21ff" : "#ffffff",
+                          color: isMe ? "#ffffff" : "#111b21",
                         }}
                       >
                         {m.content}
-                        <div style={styles.meta}>
+                        <div
+                          style={{
+                            ...styles.meta,
+                            color: isMe ? "rgba(255, 255, 255, 0.7)" : "rgba(17, 27, 33, 0.6)",
+                          }}
+                        >
                           {new Date(m.timestamp).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
