@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { api } from "./api";
+import Sidebar from "./components/Sidebar";
+import ChatWindow from "./components/ChatWindow";
 
-const socket = io("http://localhost:5000", {
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+
+const socket = io(SOCKET_URL, {
   withCredentials: true,
   transports: ["websocket", "polling"],
 });
 
-function App() {
 
+function App() {
   const [users, setUsers] = useState([
     { id: "muskan", name: "Muskan", online: false },
     { id: "dan", name: "Dan", online: false },
@@ -16,10 +20,8 @@ function App() {
     { id: "sam", name: "Sam", online: false },
   ]);
 
-
   const [senderId, setSenderId] = useState("muskan");
   const [receiverId, setReceiverId] = useState("dan");
-
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
   const bottomRef = useRef(null);
@@ -34,7 +36,6 @@ function App() {
     receiverIdRef.current = receiverId;
   }, [senderId, receiverId]);
 
-  // Load messages
   const loadMessages = async () => {
     try {
       const res = await api.get(`/messages/${senderId}/${receiverId}`);
@@ -44,13 +45,18 @@ function App() {
     }
   };
 
+  // Effect for User Status (Independent)
   useEffect(() => {
     socket.on("user_status", (onlineUserIds) => {
       setUsers((prev) =>
         prev.map((u) => ({ ...u, online: onlineUserIds.includes(u.id) }))
       );
     });
+    return () => socket.off("user_status");
+  }, []);
 
+  // Effect for Chat Messages & Typing
+  useEffect(() => {
     socket.on("typing", ({ senderId: typingSid }) => {
       const user = users.find((u) => u.id === typingSid);
       setTypingUser(user ? user.name : typingSid);
@@ -65,12 +71,9 @@ function App() {
     socket.on("new_message", (msg) => {
       if (!msg || !msg.content) return;
 
-      const currentSender = senderIdRef.current;
-      const currentReceiver = receiverIdRef.current;
-
       const isRelevant =
-        (msg.senderId === currentSender && msg.receiverId === currentReceiver) ||
-        (msg.senderId === currentReceiver && msg.receiverId === currentSender);
+        (msg.senderId === senderIdRef.current && msg.receiverId === receiverIdRef.current) ||
+        (msg.senderId === receiverIdRef.current && msg.receiverId === senderIdRef.current);
 
       if (isRelevant) {
         setMessages((prev) => {
@@ -89,10 +92,8 @@ function App() {
       socket.off("new_message");
       socket.off("typing");
       socket.off("stop_typing");
-      socket.off("user_status");
     };
-  }, [senderId, receiverId, users]);
-
+  }, [senderId, receiverId]);
 
   // Auto scroll
   useEffect(() => {
@@ -108,7 +109,7 @@ function App() {
     socket.emit("stop_typing", { senderId, receiverId });
 
     const payload = {
-      messageId: crypto.randomUUID(), // Generate locally for deduplication
+      messageId: crypto.randomUUID(),
       senderId,
       receiverId,
       content: message,
@@ -117,35 +118,23 @@ function App() {
     };
 
     try {
-      // Optimistic update
       setMessages((prev) => [...prev, payload]);
       setMessage("");
       await api.post("/send-message", payload);
     } catch (err) {
       console.error("Send failed", err);
-      // Optional: Rollback optimistic update on failure
     }
   };
 
-
   const handleTyping = (e) => {
     setMessage(e.target.value);
-
-    // Clear existing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     if (e.target.value === "") {
-      console.log("🛑 emitting stop_typing (empty)");
       socket.emit("stop_typing", { senderId, receiverId });
     } else {
-      console.log("⌨️ emitting typing");
       socket.emit("typing", { senderId, receiverId });
-
-      // Set timeout to emit stop_typing after 2 seconds of no typing
       typingTimeoutRef.current = setTimeout(() => {
-        console.log("🛑 emitting stop_typing (timeout)");
         socket.emit("stop_typing", { senderId, receiverId });
       }, 2000);
     }
@@ -154,172 +143,38 @@ function App() {
   const formatDateLabel = (date) => {
     const msgDate = new Date(date);
     const today = new Date();
-
-    const isToday =
-      msgDate.toDateString() === today.toDateString();
-
+    if (msgDate.toDateString() === today.toDateString()) return "Today";
     const yesterday = new Date();
     yesterday.setDate(today.getDate() - 1);
-
-    const isYesterday =
-      msgDate.toDateString() === yesterday.toDateString();
-
-    if (isToday) return "Today";
-    if (isYesterday) return "Yesterday";
-
-    return msgDate.toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+    if (msgDate.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return msgDate.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   };
 
   return (
-    <>
-      <div style={{ position: "fixed", top: "20px", left: "20px", zIndex: 100 }}>
-        <select
-          value={senderId}
-          onChange={(e) => setSenderId(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            borderRadius: "6px",
-            border: "1px solid #ccc",
-            fontSize: "14px",
-            boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
-          }}
-        >
-          {users.map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.name}
-            </option>
-          ))}
-        </select>
+    <div style={styles.page}>
+      <div style={styles.app}>
+        <Sidebar
+          users={users}
+          senderId={senderId}
+          receiverId={receiverId}
+          onSelectUser={setReceiverId}
+          onSenderChange={setSenderId}
+          styles={styles}
+        />
+        <ChatWindow
+          receiverId={receiverId}
+          messages={messages}
+          senderId={senderId}
+          bottomRef={bottomRef}
+          formatDateLabel={formatDateLabel}
+          typingUser={typingUser}
+          message={message}
+          onTyping={handleTyping}
+          onSendMessage={sendMessage}
+          styles={styles}
+        />
       </div>
-
-      <div style={styles.page}>
-        <div style={styles.app}>
-          {/* Sidebar */}
-          <div style={styles.sidebar}>
-            <div style={styles.sidebarHeader}>Chats</div>
-            {users
-              .filter((u) => u.id !== senderId)
-              .map((user) => (
-                <div
-                  key={user.id}
-                  onClick={() => setReceiverId(user.id)}
-                  style={{
-                    ...styles.userItem,
-                    background:
-                      receiverId === user.id ? "#1e293b" : "transparent",
-                  }}
-                >
-                  <div style={styles.avatar}>{user.name[0]}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={styles.username}>{user.name}</div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: user.online ? "#22c55e" : "#94a3b8",
-                      }}
-                    >
-                      {user.online ? "Online" : "Offline"}
-                    </div>
-                  </div>
-                </div>
-              ))}
-          </div>
-
-          {/* Chat Area */}
-          <div style={styles.chatArea}>
-            <div style={styles.header}>
-              ConvoFlow — chatting with {receiverId}
-            </div>
-
-            <div style={styles.messages}>
-              {messages.map((m, i) => {
-                const isMe = m.senderId === senderId;
-                const prevMsg = messages[i - 1];
-
-                const showDate =
-                  !prevMsg ||
-                  new Date(prevMsg.timestamp).toDateString() !==
-                  new Date(m.timestamp).toDateString();
-
-                return (
-                  <div key={i}>
-                    {showDate && (
-                      <div style={styles.dateSeparator}>
-                        {formatDateLabel(m.timestamp)}
-                      </div>
-                    )}
-
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: isMe ? "flex-end" : "flex-start",
-                        marginBottom: 8,
-                      }}
-                    >
-                      <div
-                        style={{
-                          ...styles.bubble,
-                          background: isMe ? "#349c21ff" : "#ffffff",
-                          color: isMe ? "#ffffff" : "#111b21",
-                        }}
-                      >
-                        {m.content}
-                        <div
-                          style={{
-                            ...styles.meta,
-                            color: isMe ? "rgba(255, 255, 255, 0.7)" : "rgba(17, 27, 33, 0.6)",
-                          }}
-                        >
-                          {new Date(m.timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {isMe && (
-                            <span style={styles.tick}>
-                              {m.status === "read" ? "✓✓" : "✓"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={bottomRef} />
-            </div>
-
-            {typingUser && typingUser !== senderId && (
-              <div style={styles.typing}>
-                {typingUser} is typing…
-              </div>
-            )}
-
-            <div style={styles.inputBar}>
-              <input
-                value={message}
-                onChange={handleTyping}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder="Type a message…"
-                style={styles.input}
-              />
-              <button onClick={sendMessage} style={styles.button}>
-                Send
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-
+    </div>
   );
 }
 
@@ -328,125 +183,160 @@ export default App;
 const styles = {
   page: {
     height: "100vh",
-    background: "#e5ddd5",
+    width: "100vw",
+    background: "var(--bg-deep)",
     display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
+    overflow: "hidden",
   },
   app: {
     display: "flex",
-    height: "90vh",
-    width: 900,
-    borderRadius: 12,
-    overflow: "hidden",
-    background: "#0f172a",
-    boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+    flex: 1,
+    height: "100%",
+    width: "100%",
+    background: "var(--bg-surface)",
+    position: "relative",
   },
   sidebar: {
-    width: 280,
-    background: "#020617",
-    color: "#fff",
-    padding: 16,
+    width: 320,
+    background: "var(--bg-surface)",
+    borderRight: "1px solid var(--glass-border)",
+    color: "var(--text-main)",
     display: "flex",
     flexDirection: "column",
   },
   sidebarHeader: {
-    fontSize: 18,
-    fontWeight: 600,
-    marginBottom: 16,
+    padding: "24px 20px 12px 20px",
+    fontSize: 24,
+    fontWeight: 800,
+    color: "var(--primary)",
+    letterSpacing: "-0.03em",
   },
   userItem: {
     display: "flex",
     alignItems: "center",
     gap: 12,
-    padding: 10,
-    borderRadius: 10,
+    padding: "12px 18px",
+    borderRadius: "var(--radius-md)",
     cursor: "pointer",
-    marginBottom: 8,
+    margin: "0 8px 4px 8px",
+    transition: "var(--transition)",
   },
   avatar: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: "50%",
-    background: "#334155",
+    background: "linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     fontWeight: 600,
+    color: "white",
+    fontSize: 18,
+    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.2)",
   },
   username: {
-    fontWeight: 500,
+    fontWeight: 600,
+    fontSize: 15,
   },
   chatArea: {
     flex: 1,
     display: "flex",
     flexDirection: "column",
-    background: "#f8fafc",
+    background: "rgba(15, 23, 42, 0.4)",
+    position: "relative",
   },
   header: {
-    padding: "12px 16px",
-    background: "#075e54",
-    color: "#fff",
-    fontWeight: "bold",
+    padding: "18px 24px",
+    background: "var(--glass-bg)",
+    backdropFilter: "blur(10px)",
+    borderBottom: "1px solid var(--glass-border)",
+    color: "var(--text-main)",
+    fontWeight: 600,
+    fontSize: 16,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    zIndex: 10,
   },
   messages: {
     flex: 1,
-    padding: 12,
+    padding: "24px",
     overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
   },
   bubble: {
-    maxWidth: "65%",
-    padding: "10px 14px",
-    borderRadius: 16,
+    maxWidth: "70%",
+    padding: "12px 16px",
+    borderRadius: "var(--radius-md)",
     fontSize: 14,
-    lineHeight: "1.4",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+    lineHeight: "1.5",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+    position: "relative",
   },
   dateSeparator: {
     textAlign: "center",
-    margin: "12px 0",
-    fontSize: 12,
-    color: "#667781",
+    margin: "24px 0",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "var(--text-dim)",
+    textTransform: "uppercase",
+    letterSpacing: "0.1em",
   },
   meta: {
     display: "flex",
     justifyContent: "flex-end",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
     fontSize: 10,
-    opacity: 0.6,
-    marginTop: 4,
+    marginTop: 6,
+    opacity: 0.8,
   },
   tick: {
-    fontSize: 12,
+    fontSize: 11,
+    color: "var(--primary)",
+    fontWeight: 700,
   },
   inputBar: {
     display: "flex",
-    gap: 10,
-    padding: 14,
-    background: "#ffffff",
-    borderTop: "1px solid #e5e7eb",
+    gap: 12,
+    padding: "20px 24px",
+    background: "rgba(15, 23, 42, 0.8)",
+    backdropFilter: "blur(20px)",
+    borderTop: "1px solid var(--glass-border)",
   },
   input: {
     flex: 1,
-    padding: "12px 16px",
-    borderRadius: 999,
-    border: "1px solid #e5e7eb",
+    padding: "14px 22px",
+    borderRadius: "var(--radius-full)",
+    background: "var(--bg-surface-light)",
+    border: "1px solid var(--glass-border)",
+    color: "var(--text-main)",
     outline: "none",
     fontSize: 14,
+    transition: "var(--transition)",
   },
   button: {
-    padding: "0 16px",
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: "50%",
     border: "none",
-    background: "#005c4b",
+    background: "var(--primary)",
     color: "white",
     cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "var(--transition)",
+    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
   },
   typing: {
     fontSize: 12,
-    color: "#667781",
-    marginLeft: 12,
-    marginBottom: 4,
+    color: "var(--primary)",
+    marginLeft: 24,
+    marginBottom: 12,
+    fontWeight: 500,
+    fontStyle: "italic",
   },
 };

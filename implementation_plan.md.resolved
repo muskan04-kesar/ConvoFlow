@@ -1,0 +1,69 @@
+# Smart Traffic City Map Implementation Plan
+
+Design and implement a multi-layered, zoom-based intelligent city map using `react-leaflet` to replace/enhance the current 2D grid simulation.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The current backend provides a 5x5 grid state without coordinates. I will map these 25 intersections to a real-world geographic area (e.g., downtown San Francisco) to provide the "Real-world city visualization" requested.
+> [!NOTE]
+> The "Detailed Intersection Simulation" (Zoom 18+) will be implemented using a Canvas overlay for high performance vehicle animations.
+
+## Proposed Changes
+
+### Dependencies
+- Install `leaflet`, `react-leaflet`, and `@types/leaflet`.
+
+---
+
+### Components & State
+
+#### [NEW] [CityMap.tsx](file:///c:/Users/H%20P/Desktop/uhackpro/signal-iq/components/CityMap.tsx)
+- Main map component using `MapContainer`.
+- Implements dark-themed OpenStreetMap tiles.
+- Handles zoom level detection via `map.getZoom()`.
+
+#### [NEW] [IntersectionLayer.tsx](file:///c:/Users/H%20P/Desktop/uhackpro/signal-iq/components/IntersectionLayer.tsx)
+- Orchestrates the rendering of markers/overlays based on zoom level.
+- **Zoom 12-14**: Heat circles (Green/Yellow/Red).
+- **Zoom 15-17**: Glowing signal nodes.
+- **Zoom 18+**: `SimulationOverlay`.
+
+#### [NEW] [SimulationOverlay.tsx](file:///c:/Users/H%20P/Desktop/uhackpro/signal-iq/components/SimulationOverlay.tsx)
+- Custom Leaflet overlay using HTML5 Canvas or SVG.
+- Renders 4 lanes, animated vehicles, and signal lights.
+- Uses `requestAnimationFrame` for smooth 60fps animations.
+
+#### [MODIFY] [LiveMapView.tsx](file:///c:/Users/H%20P/Desktop/uhackpro/signal-iq/components/LiveMapView.tsx)
+- Integrate the new `CityMap` into the "Live Map" tab.
+- Pass global traffic state (intersections, vehicles) to the map.
+
+#### [MODIFY] [types.ts](file:///c:/Users/H%20P/Desktop/uhackpro/signal-iq/types.ts)
+- Update [IntersectionStatus](file:///c:/Users/H%20P/Desktop/uhackpro/signal-iq/types.ts#22-28) to include `lat`, `lng`, `density`, and `aiPrediction`.
+
+---
+
+### Features
+
+#### Emergency Mode
+- Draw a blue polyline route.
+- Synchronize signal states along the route to "Green Corridor".
+
+#### AI Optimization
+- "Apply AI Optimization" button in the side panel.
+- Visual feedback on the map (marker glow updates).
+
+## Verification Plan
+
+### Automated Tests
+- Run `npm run build` to ensure TypeScript and Vite build pass.
+
+### Manual Verification
+1. Open the "Live Map" tab.
+2. Verify zoom levels:
+    - 12-14: Circle markers with density-based colors.
+    - 15-17: Signal nodes with state indicators.
+    - 18+: Detailed 2D lane-level simulation.
+3. Click an intersection and verify the AI Optimization panel.
+4. Toggle "Emergency Mode" and verify the blue route and green corridor.
+5. Check performance during high vehicle density (zoom level 18+).

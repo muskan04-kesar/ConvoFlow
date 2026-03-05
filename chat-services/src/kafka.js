@@ -1,4 +1,4 @@
-const { Kafka } = require("kafkajs");
+const { Kafka, logLevel } = require("kafkajs");
 const crypto = require("crypto");
 
 const kafka = new Kafka({
@@ -6,9 +6,19 @@ const kafka = new Kafka({
   brokers: [process.env.KAFKA_BROKER || "localhost:9092"],
   connectionTimeout: 10000,
   requestTimeout: 30000,
+  retry: {
+    initialRetryTime: 100,
+    retries: 8,
+    multiplier: 2,
+    maxRetryTime: 30000,
+  },
+  logLevel: logLevel.ERROR,
 });
 
-const producer = kafka.producer();
+const producer = kafka.producer({
+  allowAutoTopicCreation: true,
+  transactionTimeout: 30000,
+});
 
 const connectProducer = async () => {
   try {
@@ -22,15 +32,14 @@ const connectProducer = async () => {
   }
 };
 
-const sendMessage = async (message) => {
+const sendMessage = async (message, topic = process.env.KAFKA_TOPIC || "chat-messages") => {
   try {
     const payload = {
       ...message,
       messageId: message.messageId || crypto.randomUUID(),
     };
 
-    const topic = process.env.KAFKA_TOPIC || "chat-messages";
-    console.log(`📤 Attempting to send to topic: ${topic}`);
+    console.log(`📤 [Producer] Sending message to topic: ${topic}`);
 
     const result = await producer.send({
       topic: topic,
@@ -38,17 +47,45 @@ const sendMessage = async (message) => {
         {
           key: `${payload.senderId}:${payload.receiverId}`,
           value: JSON.stringify(payload),
+          headers: {
+            "retry-count": "0",
+            "original-topic": topic,
+          },
         },
       ],
-      timeout: 5000,
-      acks: -1,
+      acks: -1, // Wait for all replicas
     });
 
-    console.log("✅ Message sent successfully:", result);
+    console.log("✅ [Producer] Message sent successfully");
     return result;
   } catch (error) {
-    console.error("❌ Kafka send error:", error);
+    console.error("❌ [Producer] Kafka send error:", error);
     throw error;
+  }
+};
+
+/**
+ * Utility to send failed messages to Dead Letter Queue
+ */
+const sendToDLQ = async (message, error) => {
+  const dlqTopic = `${process.env.KAFKA_TOPIC || "chat-messages"}-dlq`;
+  try {
+    console.warn(`🚨 [DLQ] Sending message ${message.messageId} to DLQ: ${dlqTopic}`);
+    await producer.send({
+      topic: dlqTopic,
+      messages: [
+        {
+          key: message.messageId,
+          value: JSON.stringify({
+            originalMessage: message,
+            error: error.message,
+            failedAt: new Date().toISOString(),
+          }),
+        },
+      ],
+    });
+  } catch (dlqErr) {
+    console.error("💀 [DLQ] Failed to send to DLQ topic:", dlqErr);
   }
 };
 
@@ -61,4 +98,5 @@ const disconnectProducer = async () => {
   }
 };
 
-module.exports = { kafka, connectProducer, sendMessage, disconnectProducer };
+module.exports = { kafka, connectProducer, sendMessage, sendToDLQ, disconnectProducer };
+
